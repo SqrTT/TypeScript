@@ -1355,7 +1355,7 @@ namespace ts {
     export function getPossibleGenericSignatures(called: Expression, typeArgumentCount: number, checker: TypeChecker): readonly Signature[] {
         let type = checker.getTypeAtLocation(called);
         if (isOptionalChain(called.parent)) {
-            type = removeOptionality(type, !!called.parent.questionDotToken, /*isOptionalChain*/ true);
+            type = removeOptionality(type, isOptionalChainRoot(called.parent), /*isOptionalChain*/ true);
         }
 
         const signatures = isNewExpression(called.parent) ? type.getConstructSignatures() : type.getCallSignatures();
@@ -1600,8 +1600,25 @@ namespace ts {
         return !!range && shouldBeReference === tripleSlashDirectivePrefixRegex.test(sourceFile.text.substring(range.pos, range.end));
     }
 
+    export function getReplacementSpanForContextToken(contextToken: Node | undefined) {
+        if (!contextToken) return undefined;
+
+        switch (contextToken.kind) {
+            case SyntaxKind.StringLiteral:
+            case SyntaxKind.NoSubstitutionTemplateLiteral:
+                return createTextSpanFromStringLiteralLikeContent(<StringLiteralLike>contextToken);
+            default:
+                return createTextSpanFromNode(contextToken);
+        }
+    }
+
     export function createTextSpanFromNode(node: Node, sourceFile?: SourceFile, endNode?: Node): TextSpan {
         return createTextSpanFromBounds(node.getStart(sourceFile), (endNode || node).getEnd());
+    }
+
+    export function createTextSpanFromStringLiteralLikeContent(node: StringLiteralLike) {
+        if (node.isUnterminated) return undefined;
+        return createTextSpanFromBounds(node.getStart() + 1, node.getEnd() - 1);
     }
 
     export function createTextRangeFromNode(node: Node, sourceFile: SourceFile): TextRange {
@@ -2773,6 +2790,20 @@ namespace ts {
 
     export function startsWithUnderscore(name: string): boolean {
         return name.charCodeAt(0) === CharacterCodes._;
+    }
+
+    export function isGlobalDeclaration(declaration: Declaration) {
+        return !isNonGlobalDeclaration(declaration);
+    }
+
+    export function isNonGlobalDeclaration(declaration: Declaration) {
+        const sourceFile = declaration.getSourceFile();
+        // If the file is not a module, the declaration is global
+        if (!sourceFile.externalModuleIndicator && !sourceFile.commonJsModuleIndicator) {
+            return false;
+        }
+        // If the file is a module written in TypeScript, it still might be in a `declare global` augmentation
+        return isInJSFile(declaration) || !findAncestor(declaration, isGlobalScopeAugmentation);
     }
 
     // #endregion
